@@ -62,7 +62,7 @@ export default function Projects() {
             <th>Developer</th>
             <th>Locality</th>
             <th>Status</th>
-            <th>Price range</th>
+            <th>API price range</th>
             <th>Reported listings</th>
             <th>Actual live listings</th>
             <th>Possession</th>
@@ -78,7 +78,7 @@ export default function Projects() {
                 <td>{p.developer_name}</td>
                 <td>{titleCase(p.locality)}</td>
                 <td>{titleCase(p.project_status)}</td>
-                <td>{formatINR(p.price_min)} – {formatINR(p.price_max)}</td>
+                <td><span title="The API reference says rupees, but the running service returned inconsistent project price units; listing-level prices are authoritative for this submission.">{p.price_min ?? "—"} – {p.price_max ?? "—"} <small>(API)</small></span></td>
                 <td>{p.total_listings}</td>
                 <td style={mismatch ? { color: "var(--danger)", fontWeight: 600 } : undefined}>
                   {actual}

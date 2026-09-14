@@ -42,25 +42,29 @@ const INDIA_LNG = [68, 98];
 
 function impossibilityReasons(l) {
   const reasons = [];
-  if (typeof l.floor === "number" && typeof l.total_floors === "number" && l.floor > l.total_floors) {
-    reasons.push("floor > total_floors");
+  const type = String(l.property_type || '').toLowerCase();
+  const isPlot = type === 'plot';
+
+  if (typeof l.price === 'number' && l.price <= 0) reasons.push('non-positive price');
+  if (typeof l.carpet_area === 'number' && typeof l.super_built_up_area === 'number' &&
+      l.super_built_up_area > 0 && l.carpet_area > l.super_built_up_area) {
+    reasons.push('carpet_area > super_built_up_area');
   }
-  if (typeof l.floor === "number" && l.floor < 0) reasons.push("floor < 0");
-  if (typeof l.bedroom === "number" && l.bedroom <= 0) reasons.push("bedroom <= 0");
-  if (typeof l.bathroom === "number" && l.bathroom <= 0) reasons.push("bathroom <= 0");
-  if (typeof l.carpet_area === "number" && l.carpet_area <= 0) reasons.push("carpet_area <= 0");
-  if (typeof l.price === "number" && l.price <= 0) reasons.push("price <= 0");
-  if (
-    typeof l.carpet_area === "number" &&
-    typeof l.super_built_up_area === "number" &&
-    l.super_built_up_area > 0 &&
-    l.carpet_area > l.super_built_up_area
-  ) {
-    reasons.push("carpet_area > super_built_up_area");
+  if (typeof l.floor === 'number' && typeof l.total_floors === 'number' && l.floor > l.total_floors) {
+    reasons.push('floor > total_floors');
   }
-  if (typeof l.latitude === "number" && typeof l.longitude === "number") {
-    if (l.latitude < INDIA_LAT[0] || l.latitude > INDIA_LAT[1] || l.longitude < INDIA_LNG[0] || l.longitude > INDIA_LNG[1]) {
-      reasons.push("lat/long outside India");
+  // Zero bedrooms/bathrooms is legitimate for plots. For non-plots, a record
+  // claiming both zero bedrooms and zero bathrooms is structurally impossible.
+  if (!isPlot && l.bedroom === 0 && l.bathroom === 0) {
+    reasons.push('zero bedroom and bathroom on non-plot');
+  }
+  // Dataset-specific corruption found during the prior authenticated pull:
+  // latitude/longitude are occasionally transposed, producing coordinates
+  // outside the city/country region. Treat only the unmistakable transpose
+  // pattern as corruption rather than using a broad geographic heuristic.
+  if (typeof l.latitude === 'number' && typeof l.longitude === 'number') {
+    if (Math.abs(l.latitude) > 60 && Math.abs(l.longitude) < 60) {
+      reasons.push('latitude/longitude swapped');
     }
   }
   return reasons;
@@ -186,16 +190,26 @@ async function main() {
   console.log(`  -> ${fake_listing_ids.length} candidate fake listing_ids (REVIEW THESE before submitting)`);
 
   // ---------------- Q2 ----------------
-  console.log("\nQ2: trying a few duplicate-property keys —");
-  const keyA = (l) => [l.locality, l.apartment_name, l.floor, l.bedroom, l.carpet_area].join("|");
-  const keyB = (l) => [l.latitude?.toFixed(4), l.longitude?.toFixed(4), l.floor, l.bedroom].join("|");
-  const resA = summarizeDuplicateKey(listings, keyA, "locality+apartment+floor+bedroom+carpet_area");
-  const resB = summarizeDuplicateKey(listings, keyB, "lat/long(4dp)+floor+bedroom");
-  console.log(
-    "  Pick whichever of these (or a refined version) actually matches what you see when you inspect a " +
-      "duplicate group by hand — then set unique_properties below accordingly."
-  );
-  const unique_properties = resA.uniqueCount; // <-- adjust after inspecting the groups above
+  console.log("\nQ2: duplicate-property candidate key — normalized apartment + coordinates + unit attributes");
+  const norm = (v) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const keyDuplicate = (l) => [
+    norm(l.apartment_name),
+    Number(l.latitude).toFixed(4),
+    Number(l.longitude).toFixed(4),
+    l.floor,
+    l.bedroom,
+    l.bathroom,
+  ].join('|');
+  const res = summarizeDuplicateKey(listings, keyDuplicate, 'normalized name+lat/long(4dp)+floor+bedroom+bathroom');
+  const duplicateGroups = [...res.groups.values()].filter((g) => g.length > 1);
+  for (const g of duplicateGroups.slice(0, 5)) {
+    console.log('    sample group:', g.map((l) => ({
+      listing_id: l.listing_id, website: l.website, apartment_name: l.apartment_name,
+      carpet_area: l.carpet_area, latitude: l.latitude, longitude: l.longitude, floor: l.floor, bedroom: l.bedroom, bathroom: l.bathroom,
+    })));
+  }
+  console.log('  Review the samples above; genuine duplicates are different listing_id/website records describing the same physical unit.');
+  const unique_properties = res.uniqueCount;
 
   // ---------------- Q5 ----------------
   const localityRentals = rentals.filter((r) => (r.locality || "").toLowerCase() === ASSIGNED_LOCALITY);
@@ -212,14 +226,21 @@ async function main() {
   console.log(`\nQ6: ${eligible2bhk.length} eligible 2BHK live listings, avg_price_per_sqft_2bhk = ${avg_price_per_sqft_2bhk}`);
 
   // ---------------- Q7 ----------------
+  const projectListingPrices = new Map();
+  for (const l of listings) {
+    if (!l.project_id || typeof l.price !== 'number') continue;
+    const current = projectListingPrices.get(l.project_id) ?? -Infinity;
+    projectListingPrices.set(l.project_id, Math.max(current, l.price));
+  }
   let costliest = null;
   for (const p of projects) {
-    if (typeof p.price_max !== "number") continue;
-    if (!costliest || p.price_max > costliest.price_max) costliest = p;
+    const maxLive = projectListingPrices.get(p.project_id);
+    if (typeof maxLive !== 'number') continue;
+    if (!costliest || maxLive > costliest.price_max_inr) {
+      costliest = { project_id: p.project_id, price_max_inr: maxLive };
+    }
   }
-  const costliest_project = costliest
-    ? { project_id: costliest.project_id, price_max_inr: costliest.price_max }
-    : { project_id: "", price_max_inr: 0 };
+  const costliest_project = costliest || { project_id: '', price_max_inr: 0 };
   console.log(`\nQ7 costliest_project =`, costliest_project);
 
   // ---------------- Q8 ----------------

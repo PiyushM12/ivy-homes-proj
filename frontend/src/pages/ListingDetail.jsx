@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { apiRequest } from "../api/client";
+import { findSimilarListings } from "../lib/similar";
 import { useData } from "../context/DataContext";
 import { useFavourites } from "../context/FavouritesContext";
 import ListingCard from "../components/ListingCard";
@@ -18,24 +19,19 @@ export default function ListingDetail() {
   // worth noting if it happens).
   const cached = listings.find((l) => l.listing_id === id);
   const [fetched, setFetched] = useState(null);
-  const [similar, setSimilar] = useState([]);
   const [error, setError] = useState(null);
 
   const listing = cached || fetched;
 
   useEffect(() => {
     if (!cached) {
-      apiRequest(`/v1/listing/${id}`)
+      apiRequest(`/v1/listings/${id}`)
         .then(setFetched)
         .catch((e) => setError(e.detail || e.message));
     }
   }, [id, cached]);
 
-  useEffect(() => {
-    apiRequest(`/v1/listings/${id}/similar`)
-      .then((data) => setSimilar(Array.isArray(data?.results) ? data.results : data || []))
-      .catch(() => setSimilar([]));
-  }, [id]);
+  const similar = useMemo(() => findSimilarListings(listings, listing), [listings, listing]);
 
   if (!listing) {
     return <div className="loading-state">{error || "Loading listing…"}</div>;
