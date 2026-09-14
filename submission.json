@@ -1,11 +1,11 @@
 {
   "api_key": "TODO: provide via the assignment submission channel; do not commit the live key",
   "candidate": {
-    "name": "TODO: your name",
-    "email": "TODO: your @mnnit.ac.in email",
-    "repo_url": "TODO: https://github.com/you/ivy-assignment",
-    "demo_url": "TODO: https://your-app.vercel.app"
-  },
+  "name": "Piyush Mishra",
+  "email": "Piyushhmishraaa@gmail.com",
+  "repo_url": "https://github.com/PiyushM12/ivy-homes-proj.git",
+  "demo_url": ""
+},
   "answers": {
     "total_listing_records": 4400,
     "unique_properties": 4399,
