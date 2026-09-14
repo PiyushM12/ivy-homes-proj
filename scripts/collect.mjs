@@ -19,7 +19,7 @@ async function main() {
   await mkdir(DATA_DIR, { recursive: true });
 
   console.log("→ GET /health (before anything else, as a sanity + clock check)");
-  const health = await apiGet("/health").catch((e) => ({ error: String(e) }));
+  const health = await apiGet("/health", {}, false).catch((e) => ({ error: String(e) }));
   console.log("  ", JSON.stringify(health));
 
   const email = process.env.IVY_LOGIN_EMAIL;
@@ -60,7 +60,7 @@ async function main() {
   let singleListingSpotCheck = null;
   if (listings.results.length > 0) {
     const sample = listings.results[0];
-    const single = await apiGet(`/v1/listing/${sample.listing_id}`).catch((e) => ({ error: String(e) }));
+    const single = await apiGet(`/v1/listings/${sample.listing_id}`).catch((e) => ({ error: String(e) }));
     singleListingSpotCheck = { listing_id: sample.listing_id, fromCollection: sample, fromSingleEndpoint: single };
   }
 

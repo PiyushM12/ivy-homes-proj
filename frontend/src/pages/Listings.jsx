@@ -40,7 +40,7 @@ export default function Listings() {
     // default here (this is the field the assignment's own question #3
     // names), while still letting you flip it off to see everything.
     if (!showInactive) {
-      out = out.filter((l) => l.is_live !== false);
+      out = out.filter((l) => l.is_live === true);
     }
 
     if (locality) out = out.filter((l) => l.locality === locality);

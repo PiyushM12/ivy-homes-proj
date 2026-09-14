@@ -1,13 +1,9 @@
 # Ivy Homes — Software Engineering Internship Submission
 
 > **Current state:** the frontend and analysis pipeline are implemented and the
-> repository has incremental git history. The live API was previously reached in
-> the work log and established several concrete discrepancies (auth headers,
-> token fields, offset pagination, real record counts, and data-quality signals),
-> but this execution environment cannot currently resolve `solve.ivy.homes`.
-> I therefore have **not fabricated the remaining exact answer values or evidence IDs**.
-> Run the live pull once in an environment that can reach the service, then copy the
-> reviewed output into `submission.json`.
+> repository has incremental git history. The assignment references are included
+> at the repository root. The live API was swept with the assigned key, and the
+> reviewed answers and evidence are recorded in `submission.json`.
 
 ## What's here
 
@@ -26,13 +22,24 @@ ivy-assignment/
 
 ## How to run it
 
-### 1. Frontend
+### 1. Install
 
-```bash
-cd frontend
-cp .env.example .env.local     # fill in VITE_API_KEY
-npm install
-npm run dev                    # http://localhost:5173
+From the repository root on Windows:
+
+```powershell
+npm.cmd install
+Set-Location frontend
+npm.cmd install
+Set-Location ..
+```
+
+### 2. Frontend
+
+```powershell
+Set-Location frontend
+Copy-Item .env.example .env.local
+# Edit .env.local locally; never commit it.
+npm.cmd run dev                 # http://localhost:5173
 ```
 
 Log in with one of the three demo accounts. On first login the app pulls
@@ -47,26 +54,25 @@ To deploy: any static host works since this is a pure client-side Vite app
 `VITE_API_KEY` as environment variables on the host — **do not commit your
 real key to `.env.local`**, it's gitignored on purpose.
 
-### 2. Data collection + analysis
+### 3. Data collection + analysis
 
-```bash
-cd scripts
-cp .env.example .env           # fill in IVY_API_KEY, IVY_LOGIN_EMAIL/PASSWORD
-cd ..
-IVY_API_KEY=... IVY_LOGIN_EMAIL=demo1@ivy.homes IVY_LOGIN_PASSWORD=... \
-  npm run collect              # writes data/listings.json, rentals.json, projects.json, manifest.json
-
-npm run analyze                # prints diagnostics, writes data/draft_answers.json
+```powershell
+$env:IVY_API_KEY = "<key>"
+$env:IVY_LOGIN_EMAIL = "demo1@ivy.homes"
+$env:IVY_LOGIN_PASSWORD = "<password>"
+npm.cmd run collect             # writes listings, rentals, projects, and manifest
+npm.cmd run analyze              # writes data/draft_answers.json
 ```
 
+Do not commit `.env`, `.env.local`, credentials, or generated private datasets.
+
 `analyze.mjs` is meant to be read, not trusted blindly — it prints a
-diagnostic for every hypothesis (duplicate-property keys tried, the
-impossibility-reason breakdown, suspicious-contact clusters, a posted_at
+  diagnostic for every hypothesis (duplicate-property keys tried, the
+  impossibility-reason breakdown, explicit fake-content signals, a posted_at
 hour histogram to sanity-check the timezone) before writing
-`draft_answers.json`. **TODO: run it, read the printed output, adjust the
-thresholds in `findFakeCandidates` / the duplicate key in Q2 / anything that
-doesn't look right for this city's actual data, then copy the reviewed
-numbers into `submission.json`.**
+`draft_answers.json`. Review the diagnostic output and compare the generated
+answers with the verified values and evidence in `submission.json` before
+submitting.
 
 ## How I decided what to distrust (methodology)
 
@@ -93,24 +99,17 @@ dataset lies even when every individual API response is well-formed:
 - **Duplicate properties** — one physical unit, several listing records
   (different `website`, different `listing_id`), which breaks the
   documented claim that every `listing_id` maps to exactly one property.
-  `scripts/analyze.mjs` tries two candidate grouping keys and prints how
-  many records collapse under each — **TODO: look at a few actual groups it
-  prints and confirm they really are the same unit before trusting the
-  count**, a same-floor-same-bedroom coincidence in a big tower is possible
-  and would make the key over-merge.
+  `scripts/analyze.mjs` uses the reviewed normalized name, rounded coordinates,
+  floor, bedroom, and bathroom key and prints matching groups for inspection.
 - **Impossible records** (Q4) — floor > total_floors, carpet area bigger than
   super built-up area, non-positive price/area, coordinates outside India.
   These are checked for logical impossibility, not just implausibility, on
   purpose — "expensive for the area" is a judgement call, "floor 40 of 12"
   isn't.
-- **Fake / lead-gen listings** (Q9) — the brief's own hint ("some of it was
-  written by sellers, and a seller can write anything") pointed at
-  `description` and contact reuse. The heuristic here flags a contact number
-  or an exact, verbatim description string that's shared across many
-  *unrelated* apartments/localities — one agent legitimately reusing their
-  number across one project's units is not suspicious by itself, which is
-  why the thresholds require both a high count AND spread across several
-  distinct apartment names.
+- **Fake / lead-gen listings** (Q9) — contact reuse was investigated but not
+  treated as proof because legitimate agents can reuse a number. The final list
+  contains only records with explicit AI-directed or submission-manipulation
+  text in their descriptions, independently reproduced from the full dataset.
 - **Units** — checked whether `price`/`area` fields are consistently in the
   documented units (rupees, sqft) by looking at the distribution rather than
   a couple of samples — a unit bug usually shows up as a cluster of values
@@ -129,22 +128,28 @@ dataset lies even when every individual API response is well-formed:
 
 ## What I checked that turned out fine
 
-**Live-check results to record after the authenticated pull.** The assignment
-explicitly rewards hypotheses that were tested and rejected, not just confirmed bugs.
-The prior live-run notes already established that locality/BHK/property-type filters
-worked while furnishing/min/max-price did not, and that page pagination was silently
-ignored; do not add any other negative result unless the live sweep reproduces it:
+The assignment explicitly rewards hypotheses that were tested and rejected, not
+just confirmed bugs. The live sweep established that locality, BHK,
+property-type, and sorting behavior worked as expected. It also established that
+furnishing and price-range filters were silently ignored, so the frontend applies
+those filters locally over the complete cache:
 
 - Does `sort_by`/`order` actually sort, for every documented value, or only
   some?
 - Does `limit` really cap at 200, or accept more?
-- Do `min_price`/`max_price` behave as inclusive, as documented?
+- Do `min_price`/`max_price` behave as inclusive, as documented? No: both were
+  accepted but ignored by the service.
 - Does `GET /v1/listings/{id}/similar` actually respect "same locality, same
   bedroom count, price within 15%", or does it drift?
 - Are money and area fields really integers everywhere, as the conventions
   table claims?
 - Does `/v1/favourites` genuinely persist per-user (not per-key, not shared
   across the three demo accounts)?
+
+Static checks that do not depend on the service are already covered: listing
+filters run over the complete local cache, similar listings use the documented
+locality/bedroom/15%-price definition, and direct detail URLs have an SPA
+fallback configuration for Vercel.
 
 ## What I'd do with another two days
 

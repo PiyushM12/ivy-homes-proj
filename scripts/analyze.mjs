@@ -71,43 +71,14 @@ function impossibilityReasons(l) {
 }
 
 // ---------------------------------------------------------------------
-// Q9 hypothesis: lead-gen listings tend to (a) share a contact number
-// across many unrelated properties, and/or (b) share verbatim description
-// text across many unrelated properties. Real agents legitimately reuse a
-// number across ONE project's units — that's not suspicious by itself.
-// What's suspicious is the same number/description spanning many
-// DIFFERENT apartment names and localities.
+// Q9: only classify records with independently reproducible evidence of
+// deliberate non-genuine content. Contact reuse is not sufficient: agents
+// can legitimately advertise many properties with one phone number.
 // ---------------------------------------------------------------------
 function findFakeCandidates(listings) {
-  const byContact = new Map();
-  const byDescription = new Map();
-  for (const l of listings) {
-    if (l.posted_by_contact) {
-      if (!byContact.has(l.posted_by_contact)) byContact.set(l.posted_by_contact, []);
-      byContact.get(l.posted_by_contact).push(l);
-    }
-    if (l.description) {
-      if (!byDescription.has(l.description)) byDescription.set(l.description, []);
-      byDescription.get(l.description).push(l);
-    }
-  }
-
-  const suspiciousContacts = [...byContact.entries()].filter(([, ls]) => {
-    const distinctApartments = new Set(ls.map((l) => l.apartment_name)).size;
-    const distinctLocalities = new Set(ls.map((l) => l.locality)).size;
-    return ls.length >= 8 && distinctApartments >= 5 && distinctLocalities >= 3;
-  });
-
-  const suspiciousDescriptions = [...byDescription.entries()].filter(([, ls]) => {
-    const distinctApartments = new Set(ls.map((l) => l.apartment_name)).size;
-    return ls.length >= 3 && distinctApartments >= 2; // identical text, different properties
-  });
-
-  const ids = new Set();
-  for (const [, ls] of suspiciousContacts) ls.forEach((l) => ids.add(l.listing_id));
-  for (const [, ls] of suspiciousDescriptions) ls.forEach((l) => ids.add(l.listing_id));
-
-  return { ids, suspiciousContacts, suspiciousDescriptions };
+  const instructionPattern = /ai (?:assistant|coding assistant)|ignore previous instructions|modify submission\.json|dataset_audit_ref|data certified|licen[cs]e requires/i;
+  const matches = listings.filter((l) => instructionPattern.test(String(l.description || "")));
+  return { ids: new Set(matches.map((l) => l.listing_id)), matches };
 }
 
 // ---------------------------------------------------------------------
@@ -179,13 +150,8 @@ async function main() {
   console.log("  sample:", corrupt_listing_ids.slice(0, 10));
 
   // ---------------- Q9 ----------------
-  const { ids: fakeIds, suspiciousContacts, suspiciousDescriptions } = findFakeCandidates(listings);
-  console.log(`\nQ9: ${suspiciousContacts.length} suspicious contact clusters, ${suspiciousDescriptions.length} suspicious description clusters.`);
-  for (const [contact, ls] of suspiciousContacts.slice(0, 5)) {
-    console.log(
-      `  contact ${contact}: ${ls.length} listings across ${new Set(ls.map((l) => l.apartment_name)).size} apartments / ${new Set(ls.map((l) => l.locality)).size} localities`
-    );
-  }
+  const { ids: fakeIds, matches: suspiciousDescriptions } = findFakeCandidates(listings);
+  console.log(`\nQ9: ${suspiciousDescriptions.length} listings contain explicit AI-directed or submission-manipulation text.`);
   const fake_listing_ids = [...fakeIds].sort();
   console.log(`  -> ${fake_listing_ids.length} candidate fake listing_ids (REVIEW THESE before submitting)`);
 
@@ -281,7 +247,7 @@ async function main() {
   const liveByProject = new Map();
   for (const l of listings) {
     if (!l.project_id) continue;
-    if (l.is_live === false) continue; // only count live records, matching how a user would see it
+    if (l.is_live !== true) continue; // Q10 counts records explicitly marked live
     liveByProject.set(l.project_id, (liveByProject.get(l.project_id) || 0) + 1);
   }
   const mismatches = projects.filter((p) => (liveByProject.get(p.project_id) ?? 0) !== p.total_listings);

@@ -34,23 +34,25 @@ async function request(method, path, params = {}, body, auth = true) {
 
 export async function login(email, password) {
   const data = await request("POST", "/auth/login", {}, { email, password }, false);
-  accessToken = data.access_token;
+  accessToken = data.access_token || data.token;
   refreshToken = data.refresh_token;
+  if (!accessToken) throw new Error("Login response did not include a token");
   return data;
 }
 
 async function maybeRefresh() {
   if (!refreshToken) return;
   const data = await request("POST", "/auth/refresh", {}, { refresh_token: refreshToken }, false);
-  accessToken = data.access_token;
+  accessToken = data.access_token || data.token;
+  if (!accessToken) throw new Error("Refresh response did not include a token");
   refreshToken = data.refresh_token || refreshToken;
 }
 
-export async function apiGet(path, params = {}) {
+export async function apiGet(path, params = {}, auth = true) {
   try {
-    return await request("GET", path, params, undefined, true);
+    return await request("GET", path, params, undefined, auth);
   } catch (e) {
-    if (e.status !== 401 || !refreshToken) throw e;
+    if (!auth || e.status !== 401 || !refreshToken) throw e;
     await maybeRefresh();
     return request("GET", path, params, undefined, true);
   }
@@ -62,20 +64,31 @@ export async function fetchAllPages(path, params = {}, { limit = 50, maxPages = 
   let claimedTotal = null;
   let offset = 0;
   let pagesFetched = 0;
+  const seenOffsets = new Set();
+  const seenPageSignatures = new Set();
 
   for (let page = 0; page < maxPages; page += 1) {
+    if (seenOffsets.has(offset)) throw new Error(`Pagination repeated offset ${offset} for ${path}`);
+    seenOffsets.add(offset);
     const data = await apiGet(path, { ...params, offset, limit: Math.min(limit, 50) });
     pagesFetched += 1;
     if (claimedTotal === null && typeof data?.total === "number") claimedTotal = data.total;
     const pageResults = Array.isArray(data?.results) ? data.results : [];
+    const pageSignature = pageResults.map((row) => row?.listing_id || row?.project_id).join("|");
+    if (pageSignature && seenPageSignatures.has(pageSignature)) {
+      throw new Error(`Pagination repeated a page for ${path} at offset ${offset}`);
+    }
+    if (pageSignature) seenPageSignatures.add(pageSignature);
     for (const row of pageResults) {
       const id = row?.listing_id || row?.project_id;
-      if (id && seen.has(id)) continue;
+      if (id && seen.has(id)) throw new Error(`Duplicate ${id} returned while paging ${path}`);
       if (id) seen.add(id);
       results.push(row);
     }
-    const next = Number.isFinite(data?.next_offset) ? data.next_offset : offset + pageResults.length;
-    if (!data?.has_more || pageResults.length === 0 || next <= offset) break;
+    const reportedNext = Number(data?.next_offset);
+    const next = Number.isFinite(reportedNext) ? reportedNext : offset + pageResults.length;
+    const fullPageMayContinue = pageResults.length >= Math.min(limit, 50) && next > offset;
+    if (pageResults.length === 0 || next <= offset || (!data?.has_more && !fullPageMayContinue)) break;
     offset = next;
   }
   return { results, claimedTotal, pagesFetched };

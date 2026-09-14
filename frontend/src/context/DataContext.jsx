@@ -1,10 +1,10 @@
-import { createContext, useContext, useEffect, useState, useCallback, useMemo } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { fetchAllPages } from "../api/fetchAll";
 import { useAuth } from "./AuthContext";
 
 const DataContext = createContext(null);
 
-const CACHE_KEY = "ivy.dataset.v1";
+const CACHE_KEY = "ivy.dataset.v2";
 // Cache is only trusted for this long before we refetch in the background.
 // (You get a fast reload from cache either way — this just controls staleness.)
 const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -44,8 +44,10 @@ export function DataProvider({ children }) {
   const [progress, setProgress] = useState("");
   const [error, setError] = useState(null);
   const [fetchedAt, setFetchedAt] = useState(null);
+  const loadingRef = useRef(false);
 
   const loadAll = useCallback(async (force = false) => {
+    if (loadingRef.current) return;
     if (!force) {
       const cached = loadCache();
       if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
@@ -58,6 +60,7 @@ export function DataProvider({ children }) {
       }
     }
 
+    loadingRef.current = true;
     setLoading(true);
     setError(null);
     try {
@@ -93,6 +96,7 @@ export function DataProvider({ children }) {
     } catch (e) {
       setError(e.detail || e.message);
     } finally {
+      loadingRef.current = false;
       setLoading(false);
       setProgress("");
     }

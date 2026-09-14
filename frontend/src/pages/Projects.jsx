@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useData } from "../context/DataContext";
-import { formatINR, formatArea, formatDate, titleCase } from "../lib/format";
+import { formatDate, titleCase } from "../lib/format";
 
 export default function Projects() {
   const { projects, listings, loading, progress, error, meta } = useData();
@@ -19,7 +19,7 @@ export default function Projects() {
     const m = new Map();
     for (const l of listings) {
       if (!l.project_id) continue;
-      if (l.is_live === false) continue;
+      if (l.is_live !== true) continue;
       m.set(l.project_id, (m.get(l.project_id) || 0) + 1);
     }
     return m;

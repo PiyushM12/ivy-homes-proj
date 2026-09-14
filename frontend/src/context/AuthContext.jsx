@@ -14,7 +14,7 @@ export function AuthProvider({ children }) {
     try {
       const data = await apiLogin(email, password);
       const record = storeAuth({
-        accessToken: data.access_token,
+        accessToken: data.access_token || data.token,
         refreshToken: data.refresh_token,
         tokenType: data.token_type,
         expiresIn: data.expires_in,

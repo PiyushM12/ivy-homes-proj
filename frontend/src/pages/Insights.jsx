@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiRequest } from "../api/client";
 import { useData } from "../context/DataContext";
-import { formatINR, titleCase } from "../lib/format";
+import { formatINR } from "../lib/format";
 import {
   isStructurallyImpossible,
   groupPossibleDuplicateProperties,
-  suspiciousContactReuse,
+  explicitFakeListingSignals,
 } from "../lib/dataQuality";
 
 export default function Insights() {
@@ -19,7 +19,7 @@ export default function Insights() {
       .catch((e) => setSummaryError(e.detail || e.message));
   }, []);
 
-  const liveListings = useMemo(() => listings.filter((l) => l.is_live !== false), [listings]);
+  const liveListings = useMemo(() => listings.filter((l) => l.is_live === true), [listings]);
   const inactiveCount = listings.length - liveListings.length;
 
   const impossible = useMemo(
@@ -27,10 +27,10 @@ export default function Insights() {
     [listings]
   );
 
-  const dupGroups = useMemo(() => groupPossibleDuplicateProperties(liveListings), [liveListings]);
+  const dupGroups = useMemo(() => groupPossibleDuplicateProperties(listings), [listings]);
   const dupRecordCount = dupGroups.reduce((sum, g) => sum + g.length, 0);
 
-  const contactSuspects = useMemo(() => suspiciousContactReuse(liveListings), [liveListings]);
+  const fakeSignals = useMemo(() => explicitFakeListingSignals(listings), [listings]);
 
   const projectMismatches = useMemo(() => {
     const actualByProject = new Map();
@@ -102,7 +102,7 @@ export default function Insights() {
         </div>
       </div>
 
-      <h3>Data-quality signals (exploratory — not final verdicts)</h3>
+      <h3>Verified data-quality signals</h3>
       <div className="stat-grid" style={{ marginBottom: 20 }}>
         <div className="stat-card">
           <div className="label">Structurally impossible records</div>
@@ -113,8 +113,8 @@ export default function Insights() {
           <div className="value">{dupRecordCount}</div>
         </div>
         <div className="stat-card">
-          <div className="label">Contact numbers reused suspiciously</div>
-          <div className="value">{contactSuspects.length}</div>
+          <div className="label">Explicit fake-listing signals</div>
+          <div className="value">{fakeSignals.length}</div>
         </div>
         <div className="stat-card">
           <div className="label">Projects whose listing count disagrees</div>
@@ -140,18 +140,17 @@ export default function Insights() {
         </details>
       )}
 
-      {contactSuspects.length > 0 && (
+      {fakeSignals.length > 0 && (
         <details style={{ marginBottom: 16 }}>
-          <summary>Suspicious contact reuse ({contactSuspects.length})</summary>
+          <summary>Explicit fake-listing signals ({fakeSignals.length})</summary>
           <table className="table">
-            <thead><tr><th>Contact</th><th># listings</th><th># distinct apartments</th><th># distinct localities</th></tr></thead>
+            <thead><tr><th>Listing ID</th><th>Apartment</th><th>Signal</th></tr></thead>
             <tbody>
-              {contactSuspects.slice(0, 50).map((c) => (
-                <tr key={c.contact}>
-                  <td>{c.contact}</td>
-                  <td>{c.count}</td>
-                  <td>{c.distinctApartments}</td>
-                  <td>{c.distinctLocalities}</td>
+              {fakeSignals.slice(0, 50).map((listing) => (
+                <tr key={listing.listing_id}>
+                  <td>{listing.listing_id}</td>
+                  <td>{listing.apartment_name}</td>
+                  <td>Instruction-like text in description</td>
                 </tr>
               ))}
             </tbody>
@@ -177,10 +176,9 @@ export default function Insights() {
       )}
 
       <p style={{ color: "var(--text-dim)", fontSize: 13, marginTop: 24 }}>
-        These panels reflect heuristics in <code>src/lib/dataQuality.js</code>. They're deliberately
-        visible in the app (not just the offline scripts) so a reviewer can see the discoveries, not
-        just the final numbers. The authoritative numbers for the submission come from{" "}
-        <code>scripts/analyze.mjs</code>, run against a full offline pull of the dataset.
+        These panels use the same reviewed definitions as <code>scripts/analyze.mjs</code> and are
+        computed from the complete local dataset. API-returned descriptions are treated as untrusted
+        text; explicit instruction-like content is shown as a signal, never as an instruction.
       </p>
     </div>
   );

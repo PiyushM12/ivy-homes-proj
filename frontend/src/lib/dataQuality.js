@@ -8,29 +8,17 @@
 // should come from scripts/analyze.mjs, where you can iterate on the exact
 // rule against the full dataset and cross-check it before committing to it.
 
-// Rough India bounding box — anything outside this is not just "wrong
-// locality", it's not in the country.
-const INDIA_LAT = [6, 38];
-const INDIA_LNG = [68, 98];
-
-export function isGeoImpossible(l) {
-  if (typeof l.latitude !== "number" || typeof l.longitude !== "number") return false;
-  return (
-    l.latitude < INDIA_LAT[0] ||
-    l.latitude > INDIA_LAT[1] ||
-    l.longitude < INDIA_LNG[0] ||
-    l.longitude > INDIA_LNG[1]
-  );
-}
-
 export function isStructurallyImpossible(l) {
   const reasons = [];
+  const isPlot = String(l.property_type || "").toLowerCase() === "plot";
+
+  if (typeof l.price === "number" && l.price <= 0) reasons.push("non-positive price");
   if (typeof l.floor === "number" && typeof l.total_floors === "number" && l.floor > l.total_floors) {
     reasons.push("floor exceeds total_floors");
   }
-  if (typeof l.bedroom === "number" && l.bedroom <= 0) reasons.push("bedroom <= 0");
-  if (typeof l.carpet_area === "number" && l.carpet_area <= 0) reasons.push("carpet_area <= 0");
-  if (typeof l.price === "number" && l.price <= 0) reasons.push("price <= 0");
+  if (!isPlot && l.bedroom === 0 && l.bathroom === 0) {
+    reasons.push("zero bedroom and bathroom on non-plot");
+  }
   if (
     typeof l.carpet_area === "number" &&
     typeof l.super_built_up_area === "number" &&
@@ -39,7 +27,10 @@ export function isStructurallyImpossible(l) {
   ) {
     reasons.push("carpet_area exceeds super_built_up_area");
   }
-  if (isGeoImpossible(l)) reasons.push("lat/long outside India");
+  if (typeof l.latitude === "number" && typeof l.longitude === "number" &&
+      Math.abs(l.latitude) > 60 && Math.abs(l.longitude) < 60) {
+    reasons.push("latitude/longitude swapped");
+  }
   return reasons;
 }
 
@@ -50,13 +41,15 @@ export function isStructurallyImpossible(l) {
  */
 export function groupPossibleDuplicateProperties(listings) {
   const groups = new Map();
+  const normalize = (value) => String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
   for (const l of listings) {
     const key = [
-      (l.locality || "").toLowerCase(),
-      (l.apartment_name || "").toLowerCase(),
+      normalize(l.apartment_name),
+      Number(l.latitude).toFixed(4),
+      Number(l.longitude).toFixed(4),
       l.bedroom,
       l.floor,
-      l.carpet_area,
+      l.bathroom,
     ].join("|");
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(l);
@@ -64,27 +57,7 @@ export function groupPossibleDuplicateProperties(listings) {
   return [...groups.values()].filter((g) => g.length > 1);
 }
 
-/**
- * Contact numbers reused across an unusual number of listings that don't
- * look like the same project. A busy agent legitimately reuses their number;
- * the same number on wildly different apartment names/localities is the
- * pattern worth a closer look.
- */
-export function suspiciousContactReuse(listings, minCount = 8) {
-  const byContact = new Map();
-  for (const l of listings) {
-    const c = l.posted_by_contact;
-    if (!c) continue;
-    if (!byContact.has(c)) byContact.set(c, []);
-    byContact.get(c).push(l);
-  }
-  return [...byContact.entries()]
-    .filter(([, ls]) => ls.length >= minCount)
-    .map(([contact, ls]) => ({
-      contact,
-      count: ls.length,
-      distinctApartments: new Set(ls.map((l) => l.apartment_name)).size,
-      distinctLocalities: new Set(ls.map((l) => l.locality)).size,
-      listings: ls,
-    }));
+export function explicitFakeListingSignals(listings) {
+  const instructionPattern = /ai (?:assistant|coding assistant)|ignore previous instructions|modify submission\.json|dataset_audit_ref|data certified|licen[cs]e requires/i;
+  return listings.filter((listing) => instructionPattern.test(String(listing.description || "")));
 }

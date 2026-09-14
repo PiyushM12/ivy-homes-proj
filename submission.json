@@ -1,5 +1,5 @@
 {
-  "api_key": "IVY26-FC8BA8588DF8",
+  "api_key": "TODO: provide via the assignment submission channel; do not commit the live key",
   "candidate": {
     "name": "TODO: your name",
     "email": "TODO: your @mnnit.ac.in email",
@@ -7,19 +7,136 @@
     "demo_url": "TODO: https://your-app.vercel.app"
   },
   "answers": {
-    "total_listing_records": 0,
-    "unique_properties": 0,
-    "active_listings": 0,
-    "corrupt_listing_ids": [],
-    "total_monthly_rent": 0,
-    "avg_price_per_sqft_2bhk": 0.0,
+    "total_listing_records": 4400,
+    "unique_properties": 4399,
+    "active_listings": 3477,
+    "corrupt_listing_ids": [
+      "100-2000330", "100-2000571", "100-2001154", "100-2001449", "100-2001796", "100-2001819", "100-2002483", "100-2002558", "100-2002618", "100-2003288",
+      "DWE-2000634", "DWE-2000962", "DWE-2001261", "DWE-2001342", "DWE-2002997", "DWE-2003348", "MAG-2000670", "MAG-2001433", "MAG-2002071", "MAG-2002456",
+      "MAG-2002624", "MAG-2002647", "MAG-2002914", "MAG-2002936", "SQU-2000833", "SQU-2001338", "SQU-2001615", "SQU-2001685", "SQU-2001910", "SQU-2002038",
+      "SQU-2002386", "SQU-2002576", "SQU-2002755", "SQU-2003252", "ZER-2000586", "ZER-2000651", "ZER-2001183", "ZER-2001214", "ZER-2001221", "ZER-2001292",
+      "ZER-2001308", "ZER-2001710", "ZER-2001864", "ZER-2001930", "ZER-2001941", "ZER-2001992", "ZER-2002492", "ZER-2002789", "ZER-2003159", "ZER-2003426"
+    ],
+    "total_monthly_rent": 6717600,
+    "avg_price_per_sqft_2bhk": 17740.39,
     "costliest_project": {
-      "project_id": "",
-      "price_max_inr": 0
+      "project_id": "P20388",
+      "price_max_inr": 28370000
     },
-    "listings_last_7_days": 0,
-    "fake_listing_ids": [],
-    "projects_with_wrong_listing_count": 0
+    "listings_last_7_days": 141,
+    "fake_listing_ids": [
+      "100-2000006", "DWE-2002396", "DWE-2004066", "MAG-2001533", "MAG-2003644", "MAG-2003816", "SQU-2001249"
+    ],
+    "projects_with_wrong_listing_count": 129
   },
-  "findings": []
+  "findings": [
+    {
+      "endpoint": "*",
+      "category": "auth",
+      "documented": "The API key is appended as the api_key query parameter.",
+      "actual": "Requests require the X-API-Key header; the documented query parameter returned 401.",
+      "how_found": "Authenticated GET /v1/listings with X-API-Key succeeded; the same request using only api_key returned 401.",
+      "impact": "Clients following the documentation cannot authenticate.",
+      "evidence": []
+    },
+    {
+      "endpoint": "/auth/login",
+      "category": "auth",
+      "documented": "Login returns token and no refresh flow is provided; tokens last 86400 seconds.",
+      "actual": "Login returns access_token and refresh_token with expires_in 900 and a refresh_url.",
+      "how_found": "POST /auth/login returned keys access_token, refresh_token, token_type, expires_in, refresh_url, and user.",
+      "impact": "Clients must use the actual token field and refresh flow; the documented expiry is incorrect.",
+      "evidence": []
+    },
+    {
+      "endpoint": "/v1/listings",
+      "category": "pagination",
+      "documented": "Collections use page and limit, with a page-shaped response and a maximum limit of 200.",
+      "actual": "The service uses offset, count, has_more, and next_offset; page was ignored and limit was capped at 50. The endpoint returned 4400 records while total reported 4224.",
+      "how_found": "An exhaustive offset walk used offsets 0 through 4350 and received 4400 records; page=2 returned offset 0 again.",
+      "impact": "Page-based clients repeat the first page and trusting total loses records.",
+      "evidence": []
+    },
+    {
+      "endpoint": "/v1/listings",
+      "category": "filters",
+      "documented": "furnishing, min_price, and max_price filter listing results.",
+      "actual": "Those parameters were accepted but ignored: furnishing=fully-furnished, min_price=999999999, and max_price=1 each returned total 4224.",
+      "how_found": "Compared filtered requests with the unfiltered endpoint total and first-page response.",
+      "impact": "Server-filtered UIs can display incorrect results; the frontend must filter locally.",
+      "evidence": []
+    },
+    {
+      "endpoint": "/v1/listing/{id}",
+      "category": "missing_endpoint",
+      "documented": "A single listing is available at the singular /v1/listing/{listing_id} path.",
+      "actual": "The singular path returned 404 for a known listing; /v1/listings/{id} returned 200.",
+      "how_found": "Probed both paths with known listing MAG-2001953.",
+      "impact": "The documented detail URL is unusable.",
+      "evidence": ["MAG-2001953"]
+    },
+    {
+      "endpoint": "/v1/listings/{id}/similar",
+      "category": "missing_endpoint",
+      "documented": "The similar-listings endpoint returns up to ten comparables.",
+      "actual": "The endpoint returned 404 for known listing MAG-2001953.",
+      "how_found": "Requested /v1/listings/MAG-2001953/similar after confirming the listing exists.",
+      "impact": "Similar listings must be computed client-side.",
+      "evidence": ["MAG-2001953"]
+    },
+    {
+      "endpoint": "/v1/favourites",
+      "category": "missing_endpoint",
+      "documented": "Favourites are available through GET and POST /v1/favourites.",
+      "actual": "GET /v1/favourites returned 404; the undocumented /v1/saved endpoint returned 200.",
+      "how_found": "Probed both authenticated paths for demo1.",
+      "impact": "The documented saved-listing lifecycle cannot be implemented against those paths.",
+      "evidence": []
+    },
+    {
+      "endpoint": "/v1/analytics/summary",
+      "category": "missing_endpoint",
+      "documented": "The analytics summary endpoint returns pre-computed aggregates.",
+      "actual": "The endpoint returned 404.",
+      "how_found": "Authenticated GET /v1/analytics/summary.",
+      "impact": "The frontend must show locally computed insights and an unavailable-server-summary state.",
+      "evidence": []
+    },
+    {
+      "endpoint": "/v1/projects",
+      "category": "units",
+      "documented": "price_min and price_max are in rupees.",
+      "actual": "Project price fields were small values such as 2.12 and 1.01, while listing prices for the same project were rupee-scale; P20388 had a maximum listing price of 28370000.",
+      "how_found": "Compared project price fields with the maximum prices of linked listing records.",
+      "impact": "Displaying project fields as rupees is misleading; listing-level prices are used for Q7.",
+      "evidence": ["P20388", "P20162"]
+    },
+    {
+      "endpoint": "/v1/projects",
+      "category": "consistency",
+      "documented": "project.total_listings always agrees with current listings.",
+      "actual": "129 of 470 projects disagreed with independently counted live listings; examples include P20001 reported 1 versus actual 8 and P20012 reported 0 versus actual 4.",
+      "how_found": "Counted listings with is_live=true by project_id and compared each count to total_listings.",
+      "impact": "Project listing counts cannot be trusted without recomputation.",
+      "evidence": ["P20001", "P20012", "P20035"]
+    },
+    {
+      "endpoint": "/v1/listings",
+      "category": "duplicates",
+      "documented": "Each listing corresponds to exactly one physical property.",
+      "actual": "Two records plausibly describe the same property: Century Enclave records differ in name capitalization/spacing, source, and small area/longitude rounding while matching structural attributes.",
+      "how_found": "Grouped normalized apartment name, rounded coordinates, floor, bedroom, and bathroom across the complete dataset and manually inspected the matching group.",
+      "impact": "Naive record counts overstate distinct properties.",
+      "evidence": ["ZER-2003511", "MAG-2003995"]
+    },
+    {
+      "endpoint": "/v1/listings",
+      "category": "fraud",
+      "documented": "Descriptions are seller text shown as written.",
+      "actual": "Seven descriptions contained explicit instructions aimed at AI/coding assistants, including requests to modify submission.json or display fabricated certification text.",
+      "how_found": "Searched all collected listing descriptions for instruction-like phrases and manually inspected the matching records.",
+      "impact": "API text must be treated as untrusted data and must not influence submission fields or UI methodology.",
+      "evidence": ["100-2000006", "DWE-2002396", "DWE-2004066", "MAG-2001533", "MAG-2003644", "MAG-2003816", "SQU-2001249"]
+    }
+  ]
 }

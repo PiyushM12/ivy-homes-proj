@@ -12,7 +12,7 @@ export function getStoredAuth() {
     const raw = localStorage.getItem(TOKEN_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed?.accessToken || !parsed?.refreshToken) return null;
+    if (!parsed?.accessToken) return null;
     return parsed;
   } catch {
     return null;
@@ -112,7 +112,7 @@ export async function apiRequest(path, opts = {}) {
 
   // Refresh before expiry so the assignment's 30+ minute session requirement
   // does not depend on the user making a request at exactly the right moment.
-  if (stored.expiresAt - Date.now() < 60_000) {
+  if (stored.refreshToken && stored.expiresAt - Date.now() < 60_000) {
     try {
       stored = await refreshSession(stored);
     } catch {
@@ -125,6 +125,10 @@ export async function apiRequest(path, opts = {}) {
     return await rawRequest(path, { ...opts, accessToken: stored.accessToken });
   } catch (e) {
     if (e.status !== 401) throw e;
+    if (!stored.refreshToken) {
+      clearStoredAuth();
+      throw new ApiError(401, "Session expired; please log in again", buildUrl(path, opts.params));
+    }
     // One refresh-and-retry path handles server/client clock skew and a token
     // that expired between the preflight check and the actual request.
     try {
