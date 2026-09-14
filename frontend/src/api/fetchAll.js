@@ -1,66 +1,38 @@
 import { apiRequest } from "./client";
 
 /**
- * Fetches every record from a paginated collection endpoint.
- *
- * Deliberately does not stop just because `page * limit >= total` — the
- * documentation's claims about `total` being exact, and about what `limit`
- * caps at, are exactly the kind of thing this assignment expects you not to
- * trust on faith. Instead this walks pages until the server gives back an
- * empty (or short-and-repeating) page, and separately reports whatever
- * `total` the server claimed so you can compare the two.
- *
- * @param {string} path
- * @param {object} [extraParams] - filters etc., merged onto every page request
- * @param {object} [opts]
- * @param {number} [opts.limit=200]
- * @param {number} [opts.maxPages=500] - safety valve against a runaway loop
- * @returns {Promise<{results: any[], claimedTotal: number|null, pagesFetched: number}>}
+ * The running API paginates with offset/has_more. The documented page/limit
+ * contract is not reliable, so this intentionally follows what the server
+ * actually returns and de-duplicates offsets defensively.
  */
 export async function fetchAllPages(path, extraParams = {}, opts = {}) {
-  const limit = opts.limit ?? 200;
-  const maxPages = opts.maxPages ?? 500;
-
+  const limit = Math.min(opts.limit ?? 50, 50);
+  const maxPages = opts.maxPages ?? 1000;
   const results = [];
+  const seenIds = new Set();
   let claimedTotal = null;
-  let page = 1;
+  let offset = 0;
   let pagesFetched = 0;
 
-  while (page <= maxPages) {
+  for (let page = 0; page < maxPages; page += 1) {
     const data = await apiRequest(path, {
-      params: { ...extraParams, page, limit },
+      params: { ...extraParams, offset, limit },
     });
+    pagesFetched += 1;
+    if (claimedTotal === null && typeof data?.total === "number") claimedTotal = data.total;
 
     const pageResults = Array.isArray(data?.results) ? data.results : [];
-    pagesFetched += 1;
-    if (claimedTotal === null && typeof data?.total === "number") {
-      claimedTotal = data.total;
+    for (const item of pageResults) {
+      const id = item?.listing_id || item?.project_id;
+      if (id && seenIds.has(id)) continue;
+      if (id) seenIds.add(id);
+      results.push(item);
     }
 
-    if (pageResults.length === 0) break;
-
-    results.push(...pageResults);
-
-    // If the server handed back fewer than `limit`, that's almost certainly
-    // the last page — but don't assume that's the ONLY termination signal,
-    // some servers pad or short a page without being at the actual end, so
-    // we also just try one page further whenever in doubt via the loop's
-    // natural "empty page" exit above.
-    if (pageResults.length < limit) {
-      // Try one more page just in case the short page wasn't actually last.
-      const probe = await apiRequest(path, {
-        params: { ...extraParams, page: page + 1, limit },
-      });
-      pagesFetched += 1;
-      const probeResults = Array.isArray(probe?.results) ? probe.results : [];
-      if (probeResults.length === 0) break;
-      results.push(...probeResults);
-      if (probeResults.length < limit) break;
-      page += 2;
-      continue;
-    }
-
-    page += 1;
+    const nextOffset = Number.isFinite(data?.next_offset) ? data.next_offset : offset + pageResults.length;
+    const hasMore = Boolean(data?.has_more);
+    if (!hasMore || pageResults.length === 0 || nextOffset <= offset) break;
+    offset = nextOffset;
   }
 
   return { results, claimedTotal, pagesFetched };

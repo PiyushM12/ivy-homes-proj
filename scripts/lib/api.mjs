@@ -1,19 +1,14 @@
-// Minimal API client for the offline collection/analysis scripts.
-// Node 18+ has fetch built in — no dependencies needed.
-
 const BASE = process.env.IVY_API_BASE || "https://solve.ivy.homes";
 const API_KEY = process.env.IVY_API_KEY;
-
 if (!API_KEY) {
   console.error("Set IVY_API_KEY in your environment (see scripts/.env.example).");
   process.exit(1);
 }
-
-let token = null;
+let accessToken = null;
+let refreshToken = null;
 
 function buildUrl(path, params = {}) {
-  const url = new URL(path.replace(/^\//, ""), BASE + "/");
-  url.searchParams.set("api_key", API_KEY);
+  const url = new URL(path.replace(/^\//, ""), BASE.replace(/\/$/, "") + "/");
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null || v === "") continue;
     url.searchParams.set(k, v);
@@ -21,73 +16,69 @@ function buildUrl(path, params = {}) {
   return url;
 }
 
-export async function login(email, password) {
-  const url = buildUrl("/auth/login");
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`login failed: ${res.status} ${JSON.stringify(data)}`);
-  token = data.token;
-  return data;
-}
-
-export async function apiGet(path, params = {}) {
-  const url = buildUrl(path, params);
-  const headers = { Accept: "application/json" };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(url, { headers });
+async function request(method, path, params = {}, body, auth = true) {
+  const headers = { Accept: "application/json", "X-API-Key": API_KEY };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (auth && accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  const res = await fetch(buildUrl(path, params), { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const text = await res.text();
   let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = text;
-  }
+  try { data = JSON.parse(text); } catch { data = text; }
   if (!res.ok) {
-    const err = new Error(`GET ${path} -> ${res.status}: ${JSON.stringify(data)}`);
-    err.status = res.status;
-    err.body = data;
+    const err = new Error(`${method} ${path} -> ${res.status}: ${JSON.stringify(data)}`);
+    err.status = res.status; err.body = data;
     throw err;
   }
   return data;
 }
 
-/**
- * Pages a collection endpoint all the way to the end. Does not trust
- * `total` as the stopping condition — stops on an empty page (with a
- * one-page lookahead past any short page, in case a short page wasn't
- * actually the last one).
- */
-export async function fetchAllPages(path, params = {}, { limit = 200, maxPages = 1000 } = {}) {
+export async function login(email, password) {
+  const data = await request("POST", "/auth/login", {}, { email, password }, false);
+  accessToken = data.access_token;
+  refreshToken = data.refresh_token;
+  return data;
+}
+
+async function maybeRefresh() {
+  if (!refreshToken) return;
+  const data = await request("POST", "/auth/refresh", {}, { refresh_token: refreshToken }, false);
+  accessToken = data.access_token;
+  refreshToken = data.refresh_token || refreshToken;
+}
+
+export async function apiGet(path, params = {}) {
+  try {
+    return await request("GET", path, params, undefined, true);
+  } catch (e) {
+    if (e.status !== 401 || !refreshToken) throw e;
+    await maybeRefresh();
+    return request("GET", path, params, undefined, true);
+  }
+}
+
+export async function fetchAllPages(path, params = {}, { limit = 50, maxPages = 1000 } = {}) {
   const results = [];
+  const seen = new Set();
   let claimedTotal = null;
-  let page = 1;
+  let offset = 0;
   let pagesFetched = 0;
 
-  while (page <= maxPages) {
-    const data = await apiGet(path, { ...params, page, limit });
-    const pageResults = Array.isArray(data?.results) ? data.results : [];
-    pagesFetched++;
+  for (let page = 0; page < maxPages; page += 1) {
+    const data = await apiGet(path, { ...params, offset, limit: Math.min(limit, 50) });
+    pagesFetched += 1;
     if (claimedTotal === null && typeof data?.total === "number") claimedTotal = data.total;
-
-    if (pageResults.length === 0) break;
-    results.push(...pageResults);
-
-    if (pageResults.length < limit) {
-      const probe = await apiGet(path, { ...params, page: page + 1, limit });
-      pagesFetched++;
-      const probeResults = Array.isArray(probe?.results) ? probe.results : [];
-      if (probeResults.length === 0) break;
-      results.push(...probeResults);
-      if (probeResults.length < limit) break;
-      page += 2;
-      continue;
+    const pageResults = Array.isArray(data?.results) ? data.results : [];
+    for (const row of pageResults) {
+      const id = row?.listing_id || row?.project_id;
+      if (id && seen.has(id)) continue;
+      if (id) seen.add(id);
+      results.push(row);
     }
-    page += 1;
+    const next = Number.isFinite(data?.next_offset) ? data.next_offset : offset + pageResults.length;
+    if (!data?.has_more || pageResults.length === 0 || next <= offset) break;
+    offset = next;
   }
-
   return { results, claimedTotal, pagesFetched };
 }
+
+export { API_KEY, BASE };

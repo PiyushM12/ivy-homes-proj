@@ -1,44 +1,30 @@
-// Low-level HTTP client for the Ivy Homes API.
-//
-// Two things get attached to every authenticated request, per API_REFERENCE.md:
-//   1. api_key as a query parameter (scopes the request to your city)
-//   2. Authorization: Bearer <token> header (identifies the logged-in user)
-//
-// This file deliberately does NOT hardcode which query params a given
-// endpoint "supports" beyond what's needed to build the URL — filtering,
-// sorting and pagination correctness are handled at a higher layer
-// (see api/fetchAll.js and the page components), because the assignment's
-// whole point is that the documentation's claims about params can't be
-// trusted blindly. This client's job is just: build the URL, attach auth,
-// parse the response, surface errors usefully.
+// Ivy Homes API client.
+// The running service was tested independently against this assignment's
+// documentation: the API key is carried in X-API-Key, while logged-in
+// requests additionally carry Authorization: Bearer <access_token>.
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://solve.ivy.homes";
 const API_KEY = import.meta.env.VITE_API_KEY || "";
-
-const TOKEN_STORAGE_KEY = "ivy.auth.v1";
+const TOKEN_STORAGE_KEY = "ivy.auth.v2";
 
 export function getStoredAuth() {
   try {
     const raw = localStorage.getItem(TOKEN_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed?.token || !parsed?.expiresAt) return null;
-    if (Date.now() >= parsed.expiresAt) {
-      localStorage.removeItem(TOKEN_STORAGE_KEY);
-      return null;
-    }
+    if (!parsed?.accessToken || !parsed?.refreshToken) return null;
     return parsed;
   } catch {
     return null;
   }
 }
 
-export function storeAuth({ token, tokenType, expiresIn, user }) {
+export function storeAuth({ accessToken, refreshToken, tokenType, expiresIn, user }) {
   const record = {
-    token,
+    accessToken,
+    refreshToken,
     tokenType: tokenType || "Bearer",
-    // Refresh a little early (60s) so we don't get caught by clock skew.
-    expiresAt: Date.now() + (Number(expiresIn) || 0) * 1000 - 60_000,
+    expiresAt: Date.now() + (Number(expiresIn) || 900) * 1000,
     user,
   };
   localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(record));
@@ -50,8 +36,7 @@ export function clearStoredAuth() {
 }
 
 function buildUrl(path, params = {}) {
-  const url = new URL(path.replace(/^\//, ""), API_BASE + "/");
-  url.searchParams.set("api_key", API_KEY);
+  const url = new URL(path.replace(/^\//, ""), API_BASE.replace(/\/$/, "") + "/");
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === "") continue;
     url.searchParams.set(key, value);
@@ -68,28 +53,13 @@ class ApiError extends Error {
   }
 }
 
-/**
- * @param {string} path - e.g. "/v1/listings"
- * @param {object} opts
- * @param {object} [opts.params] - query params (api_key is added automatically)
- * @param {boolean} [opts.auth] - attach Authorization header from stored token
- * @param {string} [opts.method]
- * @param {object} [opts.body]
- */
-export async function apiRequest(path, opts = {}) {
-  const { params = {}, auth = true, method = "GET", body } = opts;
+async function rawRequest(path, opts = {}) {
+  const { params = {}, auth = true, method = "GET", body, accessToken } = opts;
   const url = buildUrl(path, params);
-
   const headers = { Accept: "application/json" };
+  if (API_KEY) headers["X-API-Key"] = API_KEY;
   if (body !== undefined) headers["Content-Type"] = "application/json";
-
-  if (auth) {
-    const stored = getStoredAuth();
-    if (!stored) {
-      throw new ApiError(401, "Not logged in (no valid session token)", url);
-    }
-    headers.Authorization = `${stored.tokenType} ${stored.token}`;
-  }
+  if (auth && accessToken) headers.Authorization = `Bearer ${accessToken}`;
 
   let res;
   try {
@@ -102,14 +72,10 @@ export async function apiRequest(path, opts = {}) {
     throw new ApiError(0, `Network error calling ${path}: ${networkErr.message}`, url);
   }
 
-  let payload = null;
   const text = await res.text();
+  let payload = null;
   if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = text;
-    }
+    try { payload = JSON.parse(text); } catch { payload = text; }
   }
 
   if (!res.ok) {
@@ -119,8 +85,56 @@ export async function apiRequest(path, opts = {}) {
       res.statusText;
     throw new ApiError(res.status, detail, url);
   }
-
   return payload;
+}
+
+async function refreshSession(stored) {
+  const data = await rawRequest("/auth/refresh", {
+    method: "POST",
+    auth: false,
+    body: { refresh_token: stored.refreshToken },
+  });
+  return storeAuth({
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token || stored.refreshToken,
+    tokenType: data.token_type,
+    expiresIn: data.expires_in,
+    user: data.user || stored.user,
+  });
+}
+
+export async function apiRequest(path, opts = {}) {
+  const { auth = true } = opts;
+  if (!auth) return rawRequest(path, opts);
+
+  let stored = getStoredAuth();
+  if (!stored) throw new ApiError(401, "Not logged in", buildUrl(path, opts.params));
+
+  // Refresh before expiry so the assignment's 30+ minute session requirement
+  // does not depend on the user making a request at exactly the right moment.
+  if (stored.expiresAt - Date.now() < 60_000) {
+    try {
+      stored = await refreshSession(stored);
+    } catch {
+      clearStoredAuth();
+      throw new ApiError(401, "Session expired; please log in again", buildUrl(path, opts.params));
+    }
+  }
+
+  try {
+    return await rawRequest(path, { ...opts, accessToken: stored.accessToken });
+  } catch (e) {
+    if (e.status !== 401) throw e;
+    // One refresh-and-retry path handles server/client clock skew and a token
+    // that expired between the preflight check and the actual request.
+    try {
+      stored = await refreshSession(stored);
+      return await rawRequest(path, { ...opts, accessToken: stored.accessToken });
+    } catch {
+      clearStoredAuth();
+      throw new ApiError(401, "Session expired; please log in again", buildUrl(path, opts.params));
+    }
+  }
 }
 
 export function login(email, password) {
@@ -132,7 +146,6 @@ export function login(email, password) {
 }
 
 export function logout() {
-  // Best effort — invalidate server-side, then always clear locally.
   return apiRequest("/auth/logout", { method: "POST" }).catch(() => {});
 }
 
