@@ -13,20 +13,13 @@
     "corrupt_listing_ids": [],
     "total_monthly_rent": 0,
     "avg_price_per_sqft_2bhk": 0.0,
-    "costliest_project": { "project_id": "", "price_max_inr": 0 },
+    "costliest_project": {
+      "project_id": "",
+      "price_max_inr": 0
+    },
     "listings_last_7_days": 0,
     "fake_listing_ids": [],
     "projects_with_wrong_listing_count": 0
   },
-  "findings": [
-    {
-      "endpoint": "/health",
-      "category": "timestamps",
-      "documented": "returns service status and the server clock",
-      "actual": "it does, and the clock carries an explicit +05:30 offset",
-      "how_found": "called it before writing any other code",
-      "impact": "none - this one is an example of the format, not a discrepancy",
-      "evidence": []
-    }
-  ]
+  "findings": []
 }

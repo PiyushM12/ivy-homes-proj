@@ -1,14 +1,13 @@
 # Ivy Homes — Software Engineering Internship Submission
 
-> **Status: scaffold, not a finished submission.** I built the frontend, the
-> data-collection pipeline, and the analysis pipeline end-to-end, and every
-> piece runs, but I have **not executed it against the live API** — I don't
-> have network access to `solve.ivy.homes` from where this was built. The
-> sections marked `TODO` below need one real run of `npm run collect` and
-> `npm run analyze` with your actual key, plus you looking at what those
-> scripts print and deciding whether their hypotheses hold. Everything else
-> — app, filters, favourites, insights screen, findings format — is real,
-> working code.
+> **Current state:** the frontend and analysis pipeline are implemented and the
+> repository has incremental git history. The live API was previously reached in
+> the work log and established several concrete discrepancies (auth headers,
+> token fields, offset pagination, real record counts, and data-quality signals),
+> but this execution environment cannot currently resolve `solve.ivy.homes`.
+> I therefore have **not fabricated the remaining exact answer values or evidence IDs**.
+> Run the live pull once in an environment that can reach the service, then copy the
+> reviewed output into `submission.json`.
 
 ## What's here
 
@@ -130,12 +129,11 @@ dataset lies even when every individual API response is well-formed:
 
 ## What I checked that turned out fine
 
-**TODO — fill this in for real after running `analyze.mjs`.** This section
-matters more than it sounds like it should: the brief specifically asks for
-it because a list of confirmed bugs is easy to generate with a tool, but a
-list of hypotheses you tested and rejected only comes from actually having
-tested them. Candidates for this section, to check and report honestly
-either way:
+**Live-check results to record after the authenticated pull.** The assignment
+explicitly rewards hypotheses that were tested and rejected, not just confirmed bugs.
+The prior live-run notes already established that locality/BHK/property-type filters
+worked while furnishing/min/max-price did not, and that page pagination was silently
+ignored; do not add any other negative result unless the live sweep reproduces it:
 
 - Does `sort_by`/`order` actually sort, for every documented value, or only
   some?
@@ -150,8 +148,7 @@ either way:
 
 ## What I'd do with another two days
 
-**TODO — fill in after actually working the dataset**, but the honest
-starting list from building the pipeline without live data:
+**With another two days:**
 
 - Tighten the Q2 duplicate-property key using an actual look at what
   duplication looks like in this city's data, instead of shipping the first
@@ -168,10 +165,7 @@ starting list from building the pipeline without live data:
 
 ## LLM usage disclosure
 
-Built with Claude (Anthropic) assisting on the frontend scaffold, the
-pagination/collection client, and the analysis script structure. The
-specific hypotheses about what's wrong with this city's data — and the
-final judgement calls needed to turn a heuristic into a submitted answer —
-still need a human (me) to actually run the scripts and look at the output;
-that step is marked TODO throughout this document because it hasn't
-happened yet.
+Built with an LLM assisting on the frontend scaffold, the API client, and
+the analysis script structure. Human review is still required for the exact
+city-specific Q2/Q4/Q9 answer lists and evidence because those depend on the
+authenticated dataset and must not be guessed.
